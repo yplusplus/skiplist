@@ -78,7 +78,7 @@ class skiplist {
         Node *head_;
         // tail_ is a end sentinel of skip list.
         Node *tail_;
-        // size_t indicates the current size of skip list.
+        // size_ indicates the current size of skip list.
         size_type size_;
         // max_height_ indicates the max height of all nodes of skip list, except head_ node and tail_ node.
         size_t const max_height_;
@@ -220,6 +220,7 @@ skiplist<Key, T>::skiplist()
     rnd_(0xdeadbeef) {
         assert(head_ != nullptr);
         assert(tail_ != nullptr);
+
         for (int i = 0; i < kMaxHeight; ++i) {
             head_->set_forward(i, tail_);
             tail_->set_forward(i, nullptr);
@@ -230,7 +231,7 @@ skiplist<Key, T>::skiplist()
 
 template<class Key, class T>
 skiplist<Key, T>::~skiplist() {
-    // release all nodes
+    // release all nodes memory
     Node *p = head_;
     while (p != nullptr) {
         Node *next = p->next();
@@ -299,7 +300,7 @@ std::pair<typename skiplist<Key, T>::iterator, bool> skiplist<Key, T>::insert(co
         return {iterator(this, node), false};
     }
 
-    size_t height = random_height();
+    const size_t height = random_height();
     node = new Node(value, height);
     assert(node != nullptr);
 
