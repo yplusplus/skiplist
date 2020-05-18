@@ -66,17 +66,23 @@ class skiplist {
     private:
         enum { kMaxHeight = 20 };
 
+        // find_greater_or_equal finds the first node which is greater or equal than key
+        // and previous nodes before the return node at every level.
         Node *find_greater_or_equal(const key_type &key, std::vector<Node *> &forwards) const;
 
-        // random_height generate a height for skiplist node randomly.
+        // random_height generates a height for skiplist node randomly.
         size_t random_height();
 
     private:
+        // head_ is a begin sentinel of skip list.
         Node *head_;
+        // tail_ is a end sentinel of skip list.
         Node *tail_;
+        // size_t indicates the current size of skip list.
         size_type size_;
+        // max_height_ indicates the max height of all nodes of skip list, except head_ node and tail_ node.
         size_t const max_height_;
-        // rnd_ use to generate height
+        // rnd_ uses to generate height
         std::mt19937 rnd_;
 };
 
@@ -94,7 +100,8 @@ class skiplist<Key, T>::Node {
             assert(height < forwards_.size());
             return forwards_[height];
         }
-        void set_forward(size_t height, skiplist::Node *p) {
+
+        void set_forward(size_t height, Node *p) {
             assert(height < forwards_.size());
             forwards_[height] = p;
         }
@@ -102,9 +109,14 @@ class skiplist<Key, T>::Node {
         Node *backward() const {
             return backward_;
         }
+
         void set_backward(skiplist::Node *p) {
-            assert(p != nullptr);
             backward_ = p;
+        }
+
+        // next returns the next node after this node
+        Node *next() const {
+            return forwards_[0];
         }
 
         size_t height() const {
@@ -115,9 +127,13 @@ class skiplist<Key, T>::Node {
             return value_.first;
         }
 
+        // value_ stores the data content attached this node.
         value_type value_;
+        // height_ indicates node's height. it is immutable after construction.
         const size_t height_;
+        // forwards_[i] points to the next node after this node at i-th level.
         std::vector<Node *> forwards_;
+        // backward_ points to the previous node.
         Node *backward_;
 };
 
@@ -153,7 +169,7 @@ class skiplist<Key, T>::Iterator: public std::iterator<std::bidirectional_iterat
         iterator_type &operator++() {
             assert(node_ != nullptr);
             assert(node_ != skiplist_->tail_);
-            node_ = node_->forward(0);
+            node_ = node_->next();
             return *this;
         }
         iterator_type operator++(int) {
@@ -208,16 +224,16 @@ skiplist<Key, T>::skiplist()
             head_->set_forward(i, tail_);
             tail_->set_forward(i, nullptr);
         }
-        //head_->set_backward(nullptr);
+        head_->set_backward(nullptr);
         tail_->set_backward(head_);
-    }
+}
 
 template<class Key, class T>
 skiplist<Key, T>::~skiplist() {
     // release all nodes
     Node *p = head_;
     while (p != nullptr) {
-        Node *next = p->forward(0);
+        Node *next = p->next();
         delete p;
         p = next;
     }
@@ -225,12 +241,12 @@ skiplist<Key, T>::~skiplist() {
 
 template<class Key, class T>
 typename skiplist<Key, T>::iterator skiplist<Key, T>::begin() {
-    return iterator(this, head_->forward(0));
+    return iterator(this, head_->next());
 }
 
 template<class Key, class T>
 typename skiplist<Key, T>::const_iterator skiplist<Key, T>::begin() const {
-    return const_iterator(this, head_->forward(0));
+    return const_iterator(this, head_->next());
 }
 
 template<class Key, class T>
@@ -276,19 +292,19 @@ typename skiplist<Key, T>::const_iterator skiplist<Key, T>::cend() const {
 template<class Key, class T>
 std::pair<typename skiplist<Key, T>::iterator, bool> skiplist<Key, T>::insert(const value_type &value) {
     std::vector<Node *> prevs;
-    skiplist::Node *p = find_greater_or_equal(value.first, prevs);
+    Node *node = find_greater_or_equal(value.first, prevs);
 
     // we have the same key already
-    if (p != tail_ && p->key() == value.first) {
-        return {iterator(this, p), false};
+    if (node != tail_ && node->key() == value.first) {
+        return {iterator(this, node), false};
     }
 
     size_t height = random_height();
-    skiplist::Node *node = new skiplist::Node(value, height);
+    node = new Node(value, height);
     assert(node != nullptr);
 
     node->set_backward(prevs[0]);
-    prevs[0]->forward(0)->set_backward(node);
+    prevs[0]->next()->set_backward(node);
 
     for (int i = 0; i < height; ++i) {
         node->set_forward(i, prevs[i]->forward(i));
@@ -316,7 +332,7 @@ void skiplist<Key, T>::erase(const key_type &key) {
         return;
     }
 
-    Node *next = p->forward(0);
+    Node *next = p->next();
     next->set_backward(p->backward());
     for (int i = 0; i < p->height(); i++) {
         prevs[i]->set_forward(i, p->forward(i));
@@ -324,6 +340,7 @@ void skiplist<Key, T>::erase(const key_type &key) {
 
     --size_;
 
+    // release deleted node memory
     delete p;
 }
 
@@ -402,25 +419,17 @@ typename skiplist<Key, T>::Node *skiplist<Key, T>::find_greater_or_equal(const k
     Node *p = head_;
     size_t cur_height = max_height_ - 1;
 
-    while (true) {
-        Node *next = p->forward(cur_height);
-        if (next == tail_ || next->key() >= key) {
-            prevs[cur_height] = p;
-
-            // already at the lowest level
-            if (cur_height == 0) {
-                break;
-            }
-
-            // go down
-            cur_height--;
-        } else {
-            // move forward
-            p = next;
+    // go from highest level to lowest level
+    for (int i = max_height_ - 1; i >= 0; i--) {
+        // go forward until encouter tail_ or node whose key is greater or equal than key
+        while (p->forward(i) != tail_ && p->forward(i)->key() < key) {
+            p = p->forward(i);
         }
+
+        prevs[i] = p;
     }
 
-    return p->forward(0);
+    return p->next();
 }
 
 template<class Key, class T>
