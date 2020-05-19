@@ -1,9 +1,8 @@
-#include <iterator>
-#include <algorithm>
-#include <utility>
-#include <cassert>
-#include <vector>
-#include <random>
+#include <iterator> // std::iterator
+#include <utility>  // std::pair
+#include <cassert>  // ::assert
+#include <vector>   // std::vector
+#include <random>   // std::mt19937
 
 namespace skiplist {
 
@@ -38,30 +37,49 @@ class skiplist {
 
         iterator begin();
         iterator end();
-        reverse_iterator rbegin();
-        reverse_iterator rend();
-
-        std::pair<skiplist::iterator, bool> insert(const value_type &value);
-        mapped_type & operator[](const key_type &key);
-        void erase(const key_type &key);
-        void erase(iterator it);
-        iterator find(const key_type &key);
-        iterator lower_bound(const key_type &key);
-        iterator upper_bound(const key_type &key);
-
-        // access functions for immutable skiplist
         const_iterator begin() const;
         const_iterator end() const;
         const_iterator cbegin() const;
         const_iterator cend() const;
+
+        reverse_iterator rbegin();
+        reverse_iterator rend();
         const_reverse_iterator rbegin() const;
         const_reverse_iterator rend() const;
 
+        std::pair<skiplist::iterator, bool> insert(const value_type &value);
+        mapped_type & operator[](const key_type &key);
+
+        // erase removes specified element from skiplist
+        void erase(const key_type &key);
+        // erase removes specified element from skiplist and returns iterator following the removed element
+        iterator erase(iterator it);
+
+        // find finds element with specific key and returns an iterator to the element
+        iterator find(const key_type &key);
         const_iterator find(const key_type &key) const;
+
+        // lower_bound returns an iterator to the first element not less than the given key
+        iterator lower_bound(const key_type &key);
         const_iterator lower_bound(const key_type &key) const;
+
+        // upper_bound returns an iterator to the first element greater than the given key
+        iterator upper_bound(const key_type &key);
         const_iterator upper_bound(const key_type &key) const;
 
+        // emplace inserts a new element into the skiplist constructed in-place with the given args
+        // if there is no element with the key in the container.
+        template<class ...Args>
+        std::pair<skiplist::iterator, bool> emplace(Args&&... args);
+
+        // size returns the number of elements
         size_type size() const;
+
+        // clear removes all elements from skiplist
+        void clear();
+
+        // empty checks whether the skiplist is empty
+        bool empty() const;
 
     private:
         enum { kMaxHeight = 20 };
@@ -73,14 +91,18 @@ class skiplist {
         // random_height generates a height for skiplist node randomly.
         size_t random_height();
 
+        template<class ...Args>
+        std::pair<skiplist::iterator, bool> emplace_impl(Args&&... args);
+ 
     private:
-        // head_ is a begin sentinel of skip list.
+        // head_ is a begin sentinel of skiplist.
         Node *head_;
-        // tail_ is a end sentinel of skip list.
+        // tail_ is a end sentinel of skiplist.
         Node *tail_;
-        // size_ indicates the current size of skip list.
+        // size_ indicates the current size of skiplist.
         size_type size_;
-        // max_height_ indicates the max height of all nodes of skip list, except head_ node and tail_ node.
+        // max_height_ indicates the max height of all nodes of skiplist, except head_ node and tail_ node.
+        // TODO(optimize): ajust max_height_ after inserting or erasing element
         size_t const max_height_;
         // rnd_ uses to generate height
         std::mt19937 rnd_;
@@ -89,8 +111,9 @@ class skiplist {
 template<class Key, class T>
 class skiplist<Key, T>::Node {
     public:
-        Node(const value_type &value, size_t height) 
-            : value_(value),
+        template<class ...Args>
+        Node(size_t height, Args&& ...args) 
+            : value_(std::forward<Args>(args)...),
             height_(height),
             forwards_(height, nullptr),
             backward_(nullptr) {
@@ -119,6 +142,7 @@ class skiplist<Key, T>::Node {
             return forwards_[0];
         }
 
+        // height returns the node's height
         size_t height() const {
             return height_;
         }
@@ -213,8 +237,8 @@ class skiplist<Key, T>::Iterator: public std::iterator<std::bidirectional_iterat
 
 template<class Key, class T>
 skiplist<Key, T>::skiplist() 
-    : head_(new Node(value_type(), kMaxHeight)),
-    tail_(new Node(value_type(), kMaxHeight)),
+    : head_(new Node(kMaxHeight, value_type())),
+    tail_(new Node(kMaxHeight, value_type())),
     size_(0),
     max_height_(kMaxHeight),
     rnd_(0xdeadbeef) {
@@ -231,13 +255,13 @@ skiplist<Key, T>::skiplist()
 
 template<class Key, class T>
 skiplist<Key, T>::~skiplist() {
-    // release all nodes memory
-    Node *p = head_;
-    while (p != nullptr) {
-        Node *next = p->next();
-        delete p;
-        p = next;
-    }
+
+    // clears all node
+    clear();
+
+    // destroy head_ and tail_
+    delete head_;
+    delete tail_;
 }
 
 template<class Key, class T>
@@ -301,7 +325,7 @@ std::pair<typename skiplist<Key, T>::iterator, bool> skiplist<Key, T>::insert(co
     }
 
     const size_t height = random_height();
-    node = new Node(value, height);
+    node = new Node(height, value);
     assert(node != nullptr);
 
     node->set_backward(prevs[0]);
@@ -346,10 +370,12 @@ void skiplist<Key, T>::erase(const key_type &key) {
 }
 
 template<class Key, class T>
-void skiplist<Key, T>::erase(iterator it) {
+typename skiplist<Key, T>::iterator skiplist<Key, T>::erase(iterator it) {
     assert(it != end());
     assert(it.skiplist_ == this);
-    return erase(it->first);
+    Node *node = it->node_->next();
+    erase(it->first);
+    return iterator{this, node};
 }
 
 template<class Key, class T>
@@ -378,6 +404,43 @@ typename skiplist<Key, T>::iterator skiplist<Key, T>::upper_bound(const key_type
     }
 
     return it;
+}
+
+template<class Key, class T>
+template<class ...Args>
+std::pair<typename skiplist<Key, T>::iterator, bool> skiplist<Key, T>::emplace_impl(Args&&... args) {
+
+    // create a new node with args
+    const size_t height = random_height();
+    Node *node = new Node(height, std::forward<Args>(args)...);
+    assert(node != nullptr);
+
+    std::vector<Node *> prevs;
+    Node *p = find_greater_or_equal(node->key(), prevs);
+    // have the same key already
+    if (p != tail_ && p->key() == node->key()) {
+        // release new node
+        delete node;
+        return {iterator(this, p), false};
+    }
+
+    node->set_backward(prevs[0]);
+    prevs[0]->next()->set_backward(node);
+
+    for (int i = 0; i < height; ++i) {
+        node->set_forward(i, prevs[i]->forward(i));
+        prevs[i]->set_forward(i, node);
+    }
+
+    ++size_;
+
+    return {iterator{this, node}, true};
+}
+
+template<class Key, class T>
+template<class ...Args>
+std::pair<typename skiplist<Key, T>::iterator, bool> skiplist<Key, T>::emplace(Args&&... args) {
+    return emplace_impl(std::forward<Args>(args)...);
 }
 
 template<class Key, class T>
@@ -412,6 +475,28 @@ typename skiplist<Key, T>::const_iterator skiplist<Key, T>::upper_bound(const ke
 template<class Key, class T>
 typename skiplist<Key, T>::size_type skiplist<Key, T>::size() const {
     return size_;
+}
+
+template<class Key, class T>
+void skiplist<Key, T>::clear() {
+    Node *node = head_->next();
+    while (node != tail_) {
+        Node *p = node->next();
+        delete node;
+        node = p;
+    }
+
+    for (int i = 0; i < kMaxHeight; i++) {
+        head_->set_forward(i, tail_);
+    }
+    tail_->set_backward(head_);
+
+    size_ = 0;
+}
+
+template<class Key, class T>
+bool skiplist<Key, T>::empty() const {
+    return size_ == 0;
 }
 
 template<class Key, class T>
